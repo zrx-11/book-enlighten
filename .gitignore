@@ -1,0 +1,13 @@
+__pycache__/
+*.pyc
+*.pyo
+.DS_Store
+.venv/
+venv/
+
+# 点化产物的中间目录（产物一般不放本仓库，防止误提交）
+_work/
+_build/
+
+# 打包产物
+*.zip
