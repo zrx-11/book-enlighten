@@ -241,8 +241,11 @@ def normalize_book(key, data):
         if pid not in rendered:
             continue
         h = rendered[pid]
-        h = re.sub(r"data-qid='([^']+)'", lambda m: f"data-qid='{cid}-{m.group(1)}'", h)
-        h = re.sub(r"name='([^']+)'", lambda m: f"name='{cid}-{m.group(1)}'", h)
+        def _pfx(m):
+            v = m.group(1)
+            return v if v.startswith(str(cid) + "-") else f"{cid}-{v}"
+        h = re.sub(r"data-qid='([^']+)'", lambda m: f"data-qid='{_pfx(m)}'", h)
+        h = re.sub(r"name='([^']+)'", lambda m: f"name='{_pfx(m)}'", h)
         rendered[pid] = h
         quiz_cov[cid] = True
     for q in man.get("quizzes", []):
@@ -261,6 +264,11 @@ def normalize_book(key, data):
         h = rendered[pid]
         h = re.sub(r"^\s*<h1>.*?</h1>", "", h, count=1, flags=re.S)
         parts.append(f"<h2>测验：{esc(ch.get('title', ch.get('id')))}</h2>" + h)
+    # 单书自带的综合测验页不能被覆盖，否则跨章联考题会丢
+    extra = rendered.get("__quiz_all__", "")
+    if "quiz-item" in extra:
+        extra = re.sub(r"^\s*<h1>.*?</h1>", "", extra, count=1, flags=re.S)
+        parts.append("<h2>综合测验（多章联考）</h2>" + extra)
     rendered["__quiz_all__"] = "".join(parts)
 
     data["rendered"] = rendered
@@ -474,7 +482,7 @@ header{position:sticky;top:0;z-index:20;background:var(--panel);border-bottom:1p
 .tab.active{background:var(--accent);border-color:var(--accent);color:#fff}
 .hdr-right{float:right;display:flex;gap:8px;align-items:center;margin-top:2px}
 #q{width:260px;padding:6px 10px;border:1px solid var(--border);border-radius:8px;background:var(--bg);color:var(--text);font-size:13px}
-#theme-btn{border:1px solid var(--border);background:var(--panel);color:var(--text);border-radius:8px;padding:5px 12px;cursor:pointer}
+#theme-btn{border:1px solid var(--border);background:var(--panel);color:var(--text);border-radius:8px;padding:5px 12px;cursor:pointer;white-space:nowrap}
 .layout{display:flex;min-height:calc(100vh - 60px)}
 .sidebar{width:290px;flex:none;background:var(--panel);border-right:1px solid var(--border);
   padding:14px;position:sticky;top:60px;height:calc(100vh - 60px);overflow-y:auto}
@@ -486,6 +494,7 @@ header{position:sticky;top:0;z-index:20;background:var(--panel);border-bottom:1p
 .nav-item:hover{background:var(--accent-soft);text-decoration:none}
 .nav-item.active{background:var(--accent-soft);color:var(--accent);font-weight:600}
 .nav-item .done{float:right;color:var(--ok);font-size:12px}
+#nav-toggle{display:none}
 .main{flex:1;min-width:0;padding:28px 40px 80px;max-width:920px}
 .page h1{font-size:26px;border-bottom:2px solid var(--border);padding-bottom:8px;margin-top:0}
 .page h2{font-size:20px;margin-top:26px}
@@ -534,7 +543,10 @@ svg{max-width:100%;height:auto}
 .book-card .enter{font-size:13px}
 .empty{color:var(--muted);padding:20px 0}
 @media print{header,.sidebar,.quiz-actions,.card-actions,.card-controls{display:none!important}.main{max-width:none;padding:0}}
-@media (max-width:820px){.sidebar{width:100%;height:auto;position:static}.layout{flex-direction:column}.main{padding:16px}
+@media (max-width:820px){.sidebar{width:100%;height:auto;position:static;padding:10px 14px}
+  #nav{display:none}.sidebar.open #nav{display:block}
+  #nav-toggle{display:block;width:100%;padding:8px 10px;margin:4px 0;border:1px solid var(--border);border-radius:8px;background:var(--bg);color:var(--text);font-size:14px;text-align:left;cursor:pointer}
+  .layout{flex-direction:column}.main{padding:16px}
   .hdr-right{float:none;margin-top:8px}#q{width:100%}}
 </style>
 </head>
@@ -891,17 +903,29 @@ function renderMermaid(){
   if(!els.length) return;
   const run=()=>{ try{
     mermaid.initialize({startOnLoad:false, theme:document.body.dataset.theme==='dark'?'dark':'default'});
-    els.forEach((el,idx)=>{ try{ el.innerHTML=mermaid.render('mm'+Date.now()+idx, el.textContent); el.dataset.rendered='1'; }
-      catch(e){ el.dataset.rendered='0'; } });
+    els.forEach((el,idx)=>{ try{
+      const out=mermaid.render('mm'+Date.now()+idx, el.textContent);
+      if(out && typeof out.then==='function'){
+        out.then(r=>{ el.innerHTML=r.svg; el.dataset.rendered='1'; }).catch(()=>{ el.dataset.rendered='0'; });
+      } else { el.innerHTML=out; el.dataset.rendered='1'; }
+    } catch(e){ el.dataset.rendered='0'; } });
   }catch(e){} };
   if(window.mermaid){ run(); return; }
   if(mermaidState==='loading') return;
   mermaidState='loading';
-  const s=document.createElement('script');
-  s.src='https://cdn.jsdelivr.net/npm/mermaid@10/dist/mermaid.min.js';
-  s.onload=()=>{ mermaidState='loaded'; run(); };
-  s.onerror=()=>{ mermaidState='failed'; };
-  document.head.appendChild(s);
+  const urls=['https://cdn.jsdelivr.net/npm/mermaid@10/dist/mermaid.min.js',
+              'https://unpkg.com/mermaid@10/dist/mermaid.min.js',
+              'https://registry.npmmirror.com/mermaid/10/files/dist/mermaid.min.js'];
+  let ui=0;
+  const tryNext=()=>{
+    if(ui>=urls.length){ mermaidState='failed'; return; }
+    const s=document.createElement('script');
+    s.src=urls[ui++];
+    s.onload=()=>{ mermaidState='loaded'; run(); };
+    s.onerror=()=>{ s.remove(); tryNext(); };
+    document.head.appendChild(s);
+  };
+  tryNext();
 }
 
 /* ---------- 主题 ---------- */
@@ -921,6 +945,13 @@ function route(){
   window.scrollTo(0,0);
 }
 window.addEventListener('hashchange', route);
+(function(){
+  const sb=document.querySelector('.sidebar'); if(!sb) return;
+  const btn=document.createElement('button'); btn.id='nav-toggle'; btn.textContent='目录（点开选择章节）';
+  btn.onclick=()=>sb.classList.toggle('open');
+  sb.insertBefore(btn, sb.querySelector('#nav'));
+  window.addEventListener('hashchange',()=>{ if(window.innerWidth<=820) sb.classList.remove('open'); });
+})();
 route();
 </script>
 </body>

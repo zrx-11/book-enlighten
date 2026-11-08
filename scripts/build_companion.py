@@ -395,6 +395,7 @@ a:hover{text-decoration:underline}
 .nav-item:hover{background:var(--accent-soft);text-decoration:none}
 .nav-item.active{background:var(--accent-soft);color:var(--accent);font-weight:600}
 .nav-item .done{float:right;color:var(--ok);font-size:12px}
+#nav-toggle{display:none}
 .main{flex:1;min-width:0;padding:28px 40px 80px;max-width:920px}
 .page h1{font-size:26px;border-bottom:2px solid var(--border);padding-bottom:8px;margin-top:0}
 .page h2{font-size:20px;margin-top:26px}
@@ -438,12 +439,15 @@ svg{max-width:100%;height:auto}
 .glossary-ref{color:var(--muted);font-size:12px}
 .search-hit{margin:10px 0}
 .topbar{position:sticky;top:0;background:var(--bg);padding:8px 0;display:flex;justify-content:flex-end;z-index:10}
-#theme-btn{border:1px solid var(--border);background:var(--panel);color:var(--text);border-radius:8px;padding:5px 12px;cursor:pointer}
+#theme-btn{border:1px solid var(--border);background:var(--panel);color:var(--text);border-radius:8px;padding:5px 12px;cursor:pointer;white-space:nowrap}
 #progress-bar{height:5px;background:var(--border);border-radius:3px;margin:8px 0;overflow:hidden}
 #progress-bar>div{height:100%;width:0;background:var(--accent);transition:width .3s}
 .empty{color:var(--muted);padding:20px 0}
 @media print{.sidebar,.topbar,.quiz-actions,.card-actions,.card-controls{display:none!important}.main{max-width:none;padding:0}}
-@media (max-width:760px){.sidebar{width:100%;height:auto;position:static}.layout{flex-direction:column}.main{padding:16px}}
+@media (max-width:760px){.sidebar{width:100%;height:auto;position:static;padding:10px 14px}
+  #nav{display:none}.sidebar.open #nav{display:block}
+  #nav-toggle{display:block;width:100%;padding:8px 10px;margin:4px 0;border:1px solid var(--border);border-radius:8px;background:var(--bg);color:var(--text);font-size:14px;text-align:left;cursor:pointer}
+  .layout{flex-direction:column}.main{padding:16px}}
 </style>
 </head>
 <body>
@@ -670,9 +674,7 @@ $('#q').addEventListener('input', e=>{
 /* ---------- Mermaid 懒加载（联网渲染，离线显示源码） ---------- */
 function renderMermaid(){
   if(!document.querySelector('.mermaid')) return;
-  const s=document.createElement('script');
-  s.src='https://cdn.jsdelivr.net/npm/mermaid@10/dist/mermaid.min.js';
-  s.onload=()=>{ try{
+  const boot=()=>{ try{
     mermaid.initialize({startOnLoad:false, theme: matchMedia('(prefers-color-scheme: dark)').matches?'dark':'default'});
     document.querySelectorAll('.mermaid').forEach(el=>{
       const code=el.textContent;
@@ -681,7 +683,19 @@ function renderMermaid(){
         .catch(()=>{ el.textContent=code; });
     });
   }catch(e){} };
-  document.head.appendChild(s);
+  const urls=['https://cdn.jsdelivr.net/npm/mermaid@10/dist/mermaid.min.js',
+              'https://unpkg.com/mermaid@10/dist/mermaid.min.js',
+              'https://registry.npmmirror.com/mermaid/10/files/dist/mermaid.min.js'];
+  let ui=0;
+  const tryNext=()=>{
+    if(ui>=urls.length) return;
+    const s=document.createElement('script');
+    s.src=urls[ui++];
+    s.onload=boot;
+    s.onerror=()=>{ s.remove(); tryNext(); };
+    document.head.appendChild(s);
+  };
+  tryNext();
 }
 
 /* ---------- 深色模式 ---------- */
@@ -695,6 +709,13 @@ themeBtn.onclick=()=>{
 /* ---------- 启动 ---------- */
 renderNav();
 window.addEventListener('hashchange', ()=>showPage(routeIdFromHash()));
+(function(){
+  const sb=document.querySelector('.sidebar'); if(!sb) return;
+  const btn=document.createElement('button'); btn.id='nav-toggle'; btn.textContent='目录（点开选择章节）';
+  btn.onclick=()=>sb.classList.toggle('open');
+  sb.insertBefore(btn, sb.querySelector('#nav'));
+  window.addEventListener('hashchange',()=>{ if(window.innerWidth<=760) sb.classList.remove('open'); });
+})();
 showPage(routeIdFromHash());
 </script>
 </body>
